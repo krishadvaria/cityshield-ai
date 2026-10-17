@@ -1,8 +1,10 @@
 // CityShield AI — Root Application Coordinator
-// Cyber Samvad Hackathon 2026 — Problem Statement 4: Critical Infrastructure Protection
+// Dual Portals: "Protect My City" (Municipal SOC) & "I Need Cyber Help" (Citizen Support)
+// Cyber Samvad Hackathon 2026 — Problem Statement 4
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
+import PortalGateway from './components/PortalGateway';
 import CommandCenter from './components/CommandCenter';
 import CityMap from './components/CityMap';
 import ThreatMonitor from './components/ThreatMonitor';
@@ -14,20 +16,31 @@ import CopilotDrawer from './components/CopilotDrawer';
 import AssetDetailModal from './components/AssetDetailModal';
 import RiskBreakdownModal from './components/RiskBreakdownModal';
 import DemoGuideModal from './components/DemoGuideModal';
+import CitizenHelpFlow from './components/CitizenPortal/CitizenHelpFlow';
 
+import { ThemeProvider, useTheme } from './theme/themeContext';
 import { ApiService } from './services/api';
 import { StorageService } from './services/storage';
 import { calculateCityHealth } from './services/riskEngine';
 import { INITIAL_ASSETS } from './data/mockAssets';
 import { SIMULATION_SCENARIOS } from './data/scenarios';
+import { SYNTHETIC_SAMPLE_INCIDENTS } from './data/citizenData';
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+function MainApp() {
+  // Navigation State: 'gateway' | 'management' | 'citizen'
+  const [currentPortal, setCurrentPortal] = useState('gateway');
+  // Management Tabs: 'overview' | 'assets' | 'incidents' | 'analytics'
+  const [activeTab, setActiveTab] = useState('overview');
+
+  // Municipal Datasets
   const [assets, setAssets] = useState(() => StorageService.getAssets());
   const [incidents, setIncidents] = useState(() => StorageService.getIncidents());
   const [timeline, setTimeline] = useState(() => StorageService.getTimeline());
 
-  // Modal States
+  // Citizen Preloaded Sample State
+  const [preloadedSample, setPreloadedSample] = useState(null);
+
+  // Modals & Drawers
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [simulatorIncident, setSimulatorIncident] = useState(null);
@@ -51,7 +64,7 @@ export default function App() {
     loadData();
   }, []);
 
-  // Compute overall city health and threat level dynamically
+  // Compute overall city health dynamically
   const cityHealth = useMemo(() => {
     return calculateCityHealth(assets, incidents);
   }, [assets, incidents]);
@@ -92,7 +105,6 @@ export default function App() {
   const handleResolve = async (incidentId, operator, notes) => {
     await ApiService.resolveIncident(incidentId, operator, notes);
     
-    // Find incident to restore affected asset status
     const targetInc = incidents.find(i => i.id === incidentId);
     if (targetInc && targetInc.assetId) {
       StorageService.updateAsset(targetInc.assetId, {
@@ -110,7 +122,6 @@ export default function App() {
     const targetInc = incidents.find(i => i.id === incidentId);
     if (!targetInc) return;
 
-    // Apply approved mitigations: mark incident resolved, restore asset
     handleResolve(
       incidentId, 
       'City Operator (Response Approved)', 
@@ -147,111 +158,159 @@ export default function App() {
     setIsRiskModalOpen(true);
   };
 
+  const handleTrySampleCitizen = (sampleId) => {
+    const sample = SYNTHETIC_SAMPLE_INCIDENTS.find(s => s.id === sampleId);
+    setPreloadedSample(sample || null);
+    setCurrentPortal('citizen');
+  };
+
+  // If on Gateway Screen
+  if (currentPortal === 'gateway') {
+    return (
+      <>
+        <PortalGateway
+          onSelectPortal={(portal) => {
+            setPreloadedSample(null);
+            setCurrentPortal(portal);
+          }}
+          onTrySampleCitizen={handleTrySampleCitizen}
+          onOpenGuide={() => setIsGuideModalOpen(true)}
+        />
+
+        <DemoGuideModal
+          isOpen={isGuideModalOpen}
+          onClose={() => setIsGuideModalOpen(false)}
+          onTriggerScenario={(scen) => {
+            handleTriggerScenario(scen);
+            setCurrentPortal('management');
+          }}
+          onResetDemo={handleResetDemo}
+        />
+      </>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#070B14] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div 
+      className="min-h-screen flex flex-col font-sans transition-colors duration-200"
+      style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+    >
       {/* Top Navbar */}
       <Navbar
+        currentPortal={currentPortal}
+        onSwitchPortal={(p) => {
+          setPreloadedSample(null);
+          setCurrentPortal(p);
+        }}
+        onReturnToGateway={() => setCurrentPortal('gateway')}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         cityHealth={cityHealth}
-        onTriggerScenario={handleTriggerScenario}
-        onResetDemo={handleResetDemo}
         onOpenCopilot={() => setIsCopilotOpen(true)}
         onOpenGuide={() => setIsGuideModalOpen(true)}
       />
 
-      {/* Main Content View Container */}
+      {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {activeTab === 'dashboard' && (
-          <CommandCenter
-            assets={assets}
-            incidents={incidents}
-            cityHealth={cityHealth}
-            onSelectAsset={(asset) => setSelectedAsset(asset)}
-            onSelectIncident={(incident) => {
-              setSelectedIncident(incident);
-              setActiveTab('incidents');
-            }}
-            onOpenSimulator={(incident) => setSimulatorIncident(incident)}
-            onOpenCopilot={(incident) => {
-              setSelectedIncident(incident);
-              setIsCopilotOpen(true);
-            }}
-            onTriggerScenario={handleTriggerScenario}
-            onResetDemo={handleResetDemo}
-            setActiveTab={setActiveTab}
+        {/* CITIZEN PORTAL */}
+        {currentPortal === 'citizen' && (
+          <CitizenHelpFlow
+            onBackToGateway={() => setCurrentPortal('gateway')}
+            preloadedSample={preloadedSample}
           />
         )}
 
-        {activeTab === 'map' && (
-          <CityMap
-            assets={assets}
-            incidents={incidents}
-            onSelectAsset={(asset) => setSelectedAsset(asset)}
-            selectedAssetId={selectedAsset?.id}
-          />
-        )}
+        {/* MANAGEMENT PORTAL (Organized by Progressive Disclosure) */}
+        {currentPortal === 'management' && (
+          <>
+            {/* TAB 1: OVERVIEW */}
+            {activeTab === 'overview' && (
+              <CommandCenter
+                assets={assets}
+                incidents={incidents}
+                cityHealth={cityHealth}
+                onSelectAsset={(asset) => setSelectedAsset(asset)}
+                onSelectIncident={(incident) => {
+                  setSelectedIncident(incident);
+                  setActiveTab('incidents');
+                }}
+                onOpenSimulator={(incident) => setSimulatorIncident(incident)}
+                onOpenCopilot={(incident) => {
+                  setSelectedIncident(incident);
+                  setIsCopilotOpen(true);
+                }}
+                onTriggerScenario={handleTriggerScenario}
+                onResetDemo={handleResetDemo}
+                setActiveTab={setActiveTab}
+              />
+            )}
 
-        {activeTab === 'threats' && (
-          <ThreatMonitor
-            incidents={incidents}
-            assets={assets}
-            onSelectIncident={(incident) => {
-              setSelectedIncident(incident);
-              setActiveTab('incidents');
-            }}
-            onSelectAsset={(asset) => setSelectedAsset(asset)}
-            onOpenSimulator={(incident) => setSimulatorIncident(incident)}
-            onOpenCopilot={(incident) => {
-              setSelectedIncident(incident);
-              setIsCopilotOpen(true);
-            }}
-          />
-        )}
+            {/* TAB 2: CITY ASSETS & MAP */}
+            {activeTab === 'assets' && (
+              <div className="space-y-6">
+                <CityMap
+                  assets={assets}
+                  incidents={incidents}
+                  onSelectAsset={(asset) => setSelectedAsset(asset)}
+                  selectedAssetId={selectedAsset?.id}
+                />
+              </div>
+            )}
 
-        {activeTab === 'incidents' && (
-          <IncidentManager
-            incidents={incidents}
-            assets={assets}
-            selectedIncident={selectedIncident}
-            setSelectedIncident={setSelectedIncident}
-            onAcknowledge={handleAcknowledge}
-            onResolve={handleResolve}
-            onOpenSimulator={(incident) => setSimulatorIncident(incident)}
-            onOpenCopilot={(incident) => {
-              setSelectedIncident(incident);
-              setIsCopilotOpen(true);
-            }}
-            onOpenRiskModal={handleOpenRiskModal}
-          />
-        )}
+            {/* TAB 3: INCIDENTS */}
+            {activeTab === 'incidents' && (
+              <IncidentManager
+                incidents={incidents}
+                assets={assets}
+                selectedIncident={selectedIncident}
+                setSelectedIncident={setSelectedIncident}
+                onAcknowledge={handleAcknowledge}
+                onResolve={handleResolve}
+                onOpenSimulator={(incident) => setSimulatorIncident(incident)}
+                onOpenCopilot={(incident) => {
+                  setSelectedIncident(incident);
+                  setIsCopilotOpen(true);
+                }}
+                onOpenRiskModal={handleOpenRiskModal}
+              />
+            )}
 
-        {activeTab === 'analytics' && (
-          <AnalyticsView
-            incidents={incidents}
-            assets={assets}
-            onOpenRiskModal={handleOpenRiskModal}
-          />
-        )}
-
-        {activeTab === 'timeline' && (
-          <IncidentTimeline
-            timeline={timeline}
-          />
+            {/* TAB 4: ANALYTICS & AUDIT TIMELINE */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-8">
+                <AnalyticsView
+                  incidents={incidents}
+                  assets={assets}
+                  onOpenRiskModal={handleOpenRiskModal}
+                />
+                
+                <div className="pt-6 border-t" style={{ borderColor: 'var(--border-color)' }}>
+                  <IncidentTimeline
+                    timeline={timeline}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-950 border-t border-slate-900 py-6 px-4 text-xs text-slate-500 text-center space-y-2">
+      <footer 
+        className="border-t py-6 px-4 text-xs text-center space-y-2"
+        style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}
+      >
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <span className="font-semibold text-slate-400">CityShield AI — Prototype for Cyber Samvad Hackathon 2026</span>
-          <span className="text-slate-700">•</span>
-          <span>Organized by Adani University & Demmisto Technologies</span>
-          <span className="text-slate-700">•</span>
-          <span className="text-cyan-400 font-mono">Problem Statement 4: Critical Infrastructure Protection</span>
+          <span className="font-bold" style={{ color: 'var(--text-secondary)' }}>
+            CityShield AI — Cyber Samvad Hackathon 2026
+          </span>
+          <span>•</span>
+          <span>Adani University & Demmisto Technologies</span>
+          <span>•</span>
+          <span className="font-mono text-cyan-400">Problem Statement 4: Critical Infrastructure & Citizen Protection</span>
         </div>
-        <p className="text-[11px] text-slate-600 max-w-2xl mx-auto">
-          Simulated Cyber Range & Operational Decision Support System. Synthetic data only — does not connect to or control live municipal hardware.
+        <p className="text-[11px] max-w-2xl mx-auto">
+          Simulated Cyber Range & Decision Support Prototype. All citizen incidents are processed locally in your session. Synthetic infrastructure telemetry only.
         </p>
       </footer>
 
@@ -286,9 +345,20 @@ export default function App() {
       <DemoGuideModal
         isOpen={isGuideModalOpen}
         onClose={() => setIsGuideModalOpen(false)}
-        onTriggerScenario={handleTriggerScenario}
+        onTriggerScenario={(scen) => {
+          handleTriggerScenario(scen);
+          setCurrentPortal('management');
+        }}
         onResetDemo={handleResetDemo}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <MainApp />
+    </ThemeProvider>
   );
 }
